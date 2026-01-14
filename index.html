@@ -1,6 +1,601 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Reporte de Tickets - Dashboard</title>
+
+  <!-- UI bonita (online) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Charts (online) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    .card { border: 1px solid rgba(148,163,184,.35); }
+    .muted { color: rgba(255,255,255,.72); }
+    canvas { max-height: 340px !important; }
+
+    @media print {
+      header, #tableControls { display:none !important; }
+      main { max-width: 100% !important; padding: 0 !important; }
+      .card { break-inside: avoid; page-break-inside: avoid; }
+      canvas { max-height: 260px !important; }
+      body { background: white !important; color: #0f172a !important; }
+      .muted { color: #334155 !important; }
+      .print-title { display:block !important; }
+    }
+    .print-title { display:none; }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100">
+  <header class="sticky top-0 z-20 bg-slate-950/80 backdrop-blur border-b border-slate-700/40">
+    <div class="max-w-6xl mx-auto px-4 py-4">
+      <div class="flex flex-wrap items-center gap-3 justify-between">
+        <div>
+          <h1 class="text-lg font-extrabold">Dashboard de Tickets</h1>
+          <p class="text-sm muted">Cargue un CSV (delimitador “;”), filtre por analista y exporte un HTML o PDF listo para enviar.</p>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <input id="fileInput" type="file" accept=".csv,text/csv" class="hidden" />
+          <button id="btnPickFile" class="px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 text-sm font-semibold hover:bg-slate-800/60">
+            Importar CSV
+          </button>
+
+          <select id="ownerSelect" class="px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 text-sm">
+            <option value="__ALL__">General (Todos)</option>
+          </select>
+
+          <button id="btnExportHtml" class="px-3 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-sm font-bold">
+            Exportar HTML (selección)
+          </button>
+
+          <button id="btnExportPdf" class="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-sm font-bold">
+            Exportar PDF (selección)
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div id="dropZone" class="col-span-1 md:col-span-2 text-xs px-3 py-3 rounded-xl bg-slate-800/30 border border-dashed border-slate-600/50 muted">
+          Arrastre y suelte el CSV aquí (opcional). También puede usar “Importar CSV”.
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="fileInfo" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">Sin archivo</span>
+          <span id="statusInfo" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">Listo</span>
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <span id="errBanner" class="hidden text-xs px-3 py-2 rounded-xl bg-red-500/15 border border-red-400/40 text-red-200 block"></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6 space-y-4">
+    <section class="print-title">
+      <h1 class="text-2xl font-black">Reporte de Tickets</h1>
+      <p class="text-sm">Generado automáticamente</p>
+      <hr class="my-3" />
+    </section>
+
+    <!-- KPIs -->
+    <section class="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <div class="text-xs muted">Tickets (total)</div>
+        <div id="kpiTotal" class="text-2xl font-black mt-1">–</div>
+      </div>
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <div class="text-xs muted">Reabiertos (&gt;0)</div>
+        <div id="kpiReopened" class="text-2xl font-black mt-1">–</div>
+      </div>
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <div class="text-xs muted">Interacciones (threads total)</div>
+        <div id="kpiThreadsTotal" class="text-2xl font-black mt-1">–</div>
+      </div>
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <div class="text-xs muted">Promedio threads/ticket</div>
+        <div id="kpiThreadsAvg" class="text-2xl font-black mt-1">–</div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">1) Total por clasificación</h2>
+        <p id="txtClass" class="text-xs muted mt-1"></p>
+        <canvas id="chClass"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">2) Tickets por estado (Top 12 + Otros)</h2>
+        <p id="txtStatus" class="text-xs muted mt-1"></p>
+        <canvas id="chStatus"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">3) Top 5 clientes con más tickets</h2>
+        <p id="txtClients" class="text-xs muted mt-1"></p>
+        <canvas id="chClients"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">4) SLA - Violaciones</h2>
+        <p id="txtSLA" class="text-xs muted mt-1"></p>
+        <canvas id="chSLA"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">5) Top 10 categorías</h2>
+        <p id="txtCat" class="text-xs muted mt-1"></p>
+        <canvas id="chCat"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">6) Top 10 eventos</h2>
+        <p id="txtEvt" class="text-xs muted mt-1"></p>
+        <canvas id="chEvt"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">7) Reaperturas (comparación vs total)</h2>
+        <p id="txtReopen" class="text-xs muted mt-1"></p>
+        <canvas id="chReopen"></canvas>
+      </div>
+
+      <div class="card rounded-2xl bg-slate-900/40 p-4">
+        <h2 class="font-bold">8) Interacciones por ticket (Top 10 Ticket ID)</h2>
+        <p id="txtThreads" class="text-xs muted mt-1"></p>
+        <canvas id="chThreadsTop"></canvas>
+      </div>
+    </section>
+
+    <!-- Table -->
+    <section class="card rounded-2xl bg-slate-900/40 p-4">
+      <div id="tableControls" class="flex flex-wrap items-center gap-2 justify-between">
+        <h2 class="font-bold">Tabla (filtrada)</h2>
+        <div class="flex items-center gap-2">
+          <input id="searchInput" placeholder="Buscar..." class="px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 text-sm" />
+          <span id="tableCount" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">0 filas</span>
+        </div>
+      </div>
+
+      <div class="overflow-auto mt-3 border border-slate-700/40 rounded-xl">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-950/70 sticky top-0">
+            <tr id="thRow"></tr>
+          </thead>
+          <tbody id="tbRows" class="divide-y divide-slate-800"></tbody>
+        </table>
+      </div>
+      <p class="text-xs muted mt-2">La tabla muestra hasta 2500 filas por rendimiento, pero las métricas usan el total.</p>
+    </section>
+  </main>
+
+<script>
+/* ================= Utils ================= */
+const INVALID_TOKENS = new Set(["#REF!","#N/A","#VALUE!","#NAME?","#DIV/0!","#NULL!"]);
+const el = (id) => document.getElementById(id);
+
+function setStatus(msg){ el("statusInfo").textContent = msg; }
+function showErr(msg){ el("errBanner").classList.remove("hidden"); el("errBanner").textContent = msg; }
+function clearErr(){ el("errBanner").classList.add("hidden"); el("errBanner").textContent = ""; }
+
+function cleanText(v){
+  if (v === null || v === undefined) return "";
+  const s = String(v).replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();
+  if (!s) return "";
+  if (INVALID_TOKENS.has(s.toUpperCase())) return "";
+  return s;
+}
+function normColName(s){ return cleanText(s).toLowerCase().replace(/[^a-z0-9]/g,''); }
+
+function findCol(headers, preferred){
+  const normMap = new Map(headers.map(h => [normColName(h), h]));
+  for (const p of preferred){
+    if (headers.includes(p)) return p;
+    const n = normColName(p);
+    if (normMap.has(n)) return normMap.get(n);
+  }
+  const prefTokens = preferred
+    .map(p => (normColName(p).match(/[a-z0-9]+/g)||[]))
+    .filter(t => t.length);
+  for (const h of headers){
+    const nh = normColName(h);
+    for (const toks of prefTokens){
+      if (toks.every(t => nh.includes(t))) return h;
+    }
+  }
+  return null;
+}
+function toNumber(v, fallback=0){
+  const s = cleanText(v);
+  if (!s) return fallback;
+  const n = Number(s.replace(',','.'));
+  return Number.isFinite(n) ? n : fallback;
+}
+function pct(v,total){ return total ? (v/total*100) : 0; }
+function countBy(arr){
+  const m = new Map();
+  for (const x of arr){
+    const k = cleanText(x) || "Sin datos";
+    m.set(k, (m.get(k)||0) + 1);
+  }
+  return m;
+}
+function sortDescEntries(map){ return [...map.entries()].sort((a,b)=>b[1]-a[1]); }
+function topNFromMap(map, n){ return sortDescEntries(map).slice(0,n); }
+function topNPlusOthers(map, n){
+  const arr = sortDescEntries(map);
+  if (arr.length <= n) return arr;
+  const top = arr.slice(0,n);
+  const rest = arr.slice(n).reduce((s,[,v])=>s+v,0);
+  top.push(["Otros", rest]);
+  return top;
+}
+function bulletText(entries, total){
+  return entries.map(([k,v]) => `${k}: ${v} (${pct(v,total).toFixed(1)}%)`).join(" • ");
+}
+
+/* ================= CSV parser (sin librerías) =================
+   - Delimitador ; (como tu CSV)
+   - Soporta comillas y ; dentro de comillas
+*/
+function parseCsvSemicolon(text){
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i=0;i<text.length;i++){
+    const c = text[i];
+    const next = text[i+1];
+
+    if (c === '"'){
+      if (inQuotes && next === '"'){ field += '"'; i++; }
+      else inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (!inQuotes && c === ';'){
+      row.push(field);
+      field = "";
+      continue;
+    }
+
+    if (!inQuotes && (c === '\n' || c === '\r')){
+      if (c === '\r' && next === '\n') i++;
+      row.push(field);
+      field = "";
+      if (row.length > 1 || cleanText(row[0])) rows.push(row);
+      row = [];
+      continue;
+    }
+
+    field += c;
+  }
+
+  row.push(field);
+  if (row.length > 1 || cleanText(row[0])) rows.push(row);
+
+  if (!rows.length) return { headers: [], data: [] };
+
+  const headers = rows[0].map(h => cleanText(h));
+  const data = rows.slice(1).map(r=>{
+    const obj = {};
+    for (let i=0;i<headers.length;i++){
+      obj[headers[i]] = cleanText(r[i] ?? "");
+    }
+    return obj;
+  });
+
+  return { headers, data };
+}
+
+/* ================= Data & Columns ================= */
+let RAW = { headers: [], data: [] };
+let FILTERED = [];
+let LAST_FILE_NAME = "CSV";
+
+function detectColumns(headers){
+  return {
+    classifications: findCol(headers, ["Classifications","Classification","Clasificación"]),
+    status: findCol(headers, ["Status (Ticket)","Status","Estado"]),
+    customer: findCol(headers, ["Company / Customer","Company/Customer","Company","Customer","Cliente","Empresa"]),
+    account: findCol(headers, ["Account Name","Account","Cuenta"]),
+    sla: findCol(headers, ["SLA Violation Type","SLA"]),
+    cat: findCol(headers, ["Categoria do Evento","Categoría del Evento","Categoria","Categoría"]),
+    evt: findCol(headers, ["Evento","Event"]),
+    reopen: findCol(headers, ["Number of Reopen","Reopen","Reaperturas"]),
+    threads: findCol(headers, ["Number of Threads","Threads","Interacciones"]),
+    owner: findCol(headers, ["Ticket Owner","Owner","Responsable","Agente"]),
+    ticketId: findCol(headers, ["Ticket ID","Ticket Id","Ticket","ID"])
+  };
+}
+
+/* ================= Charts ================= */
+let charts = {};
+function destroyChart(key){
+  if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+}
+function makeChart(key, canvasId, labels, data, horizontal=false){
+  destroyChart(key);
+
+  if (!window.Chart){
+    const c = el(canvasId);
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0,0,c.width,c.height);
+    return;
+  }
+
+  const ctx = el(canvasId);
+  charts[key] = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderWidth: 1,
+        backgroundColor: "rgba(99,102,241,.65)",
+        borderColor: "rgba(99,102,241,1)"
+      }]
+    },
+    options: {
+      indexAxis: horizontal ? "y" : "x",
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const total = data.reduce((a,b)=>a+b,0) || 1;
+              const v = c.raw || 0;
+              return ` ${v} (${(v/total*100).toFixed(1)}%)`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: "rgba(255,255,255,.75)" }, grid: { color: "rgba(148,163,184,.12)" } },
+        y: { ticks: { color: "rgba(255,255,255,.75)" }, grid: { color: "rgba(148,163,184,.12)" } }
+      }
+    }
+  });
+}
+
+/* ================= Rendering ================= */
+function renderOwnerSelect(rows, cols){
+  const sel = el("ownerSelect");
+  const current = sel.value;
+  sel.innerHTML = `<option value="__ALL__">General (Todos)</option>`;
+  if (!cols.owner) return;
+
+  const owners = new Set();
+  rows.forEach(r => { const o = cleanText(r[cols.owner]); if (o) owners.add(o); });
+  [...owners].sort((a,b)=>a.localeCompare(b,'es')).forEach(o => {
+    const opt = document.createElement("option");
+    opt.value = o; opt.textContent = o;
+    sel.appendChild(opt);
+  });
+
+  if ([...sel.options].some(o=>o.value===current)) sel.value = current;
+}
+
+function setKpis(total, reopenedCount, threadsTotal, threadsAvg){
+  el("kpiTotal").textContent = total.toLocaleString("es-ES");
+  el("kpiReopened").textContent = `${reopenedCount.toLocaleString("es-ES")} (${pct(reopenedCount,total).toFixed(1)}%)`;
+  el("kpiThreadsTotal").textContent = Math.round(threadsTotal).toLocaleString("es-ES");
+  el("kpiThreadsAvg").textContent = threadsAvg.toFixed(2);
+}
+
+function renderTable(headers, rows){
+  const th = el("thRow");
+  const tb = el("tbRows");
+  th.innerHTML = "";
+  tb.innerHTML = "";
+
+  headers.forEach(h=>{
+    const cell = document.createElement("th");
+    cell.className = "text-left px-3 py-2 font-semibold text-slate-200 whitespace-nowrap";
+    cell.textContent = h;
+    th.appendChild(cell);
+  });
+
+  const MAX = 2500;
+  const show = rows.slice(0, MAX);
+  show.forEach(r=>{
+    const tr = document.createElement("tr");
+    headers.forEach(h=>{
+      const td = document.createElement("td");
+      td.className = "px-3 py-2 whitespace-nowrap text-slate-200";
+      td.textContent = cleanText(r[h] ?? "");
+      tr.appendChild(td);
+    });
+    tb.appendChild(tr);
+  });
+
+  el("tableCount").textContent = `${rows.length} filas` + (rows.length > MAX ? ` (mostrando ${MAX})` : "");
+}
+
+function applySearch(){
+  const q = cleanText(el("searchInput").value).toLowerCase();
+  if (!q) { renderTable(RAW.headers, FILTERED); return; }
+  const filtered = FILTERED.filter(r => RAW.headers.map(h=>cleanText(r[h])).join(" ").toLowerCase().includes(q));
+  renderTable(RAW.headers, filtered);
+}
+
+function buildReport(rows){
+  clearErr();
+  if (!rows.length){
+    showErr("No hay filas para calcular (0). Importe un CSV.");
+    return;
+  }
+
+  const headers = RAW.headers;
+  const cols = detectColumns(headers);
+  const total = rows.length;
+
+  // 1) Classifications
+  const cls = rows.map(r=>{
+    const v = cleanText(cols.classifications ? r[cols.classifications] : "");
+    const low = v.toLowerCase();
+    if (low.includes("requisi")) return "Requisición";
+    if (low.includes("incid")) return "Incidente";
+    return v || "Sin clasificación";
+  });
+  const clsEntries = sortDescEntries(countBy(cls));
+
+  // 2) Status
+  const st = rows.map(r => cleanText(cols.status ? r[cols.status] : "") || "Sin estado");
+  const stEntries = topNPlusOthers(countBy(st), 12);
+
+  // 3) Clients
+  let clientCol = cols.customer || cols.account;
+  let clients = rows.map(r => cleanText(clientCol ? r[clientCol] : "") || "Sin cliente");
+  if (new Set(clients).size <= 1 && cols.account && clientCol !== cols.account){
+    clientCol = cols.account;
+    clients = rows.map(r => cleanText(clientCol ? r[clientCol] : "") || "Sin cliente");
+  }
+  const topClients = topNFromMap(countBy(clients), 5);
+
+  // 4) SLA
+  const sla = rows.map(r => cleanText(cols.sla ? r[cols.sla] : "") || "Sin información");
+  const slaEntries = topNPlusOthers(countBy(sla), 12);
+
+  // 5) Categories
+  const cat = rows.map(r => cleanText(cols.cat ? r[cols.cat] : "") || "Sin categoría");
+  const catEntries = topNFromMap(countBy(cat), 10);
+
+  // 6) Events
+  const evt = rows.map(r => cleanText(cols.evt ? r[cols.evt] : "") || "Sin evento");
+  const evtEntries = topNFromMap(countBy(evt), 10);
+
+  // 7) Reopen (0,1,2,3+)
+  const reopen = rows.map(r => Math.max(0, Math.floor(toNumber(cols.reopen ? r[cols.reopen] : 0, 0))));
+  const c0 = reopen.filter(x=>x===0).length;
+  const c1 = reopen.filter(x=>x===1).length;
+  const c2 = reopen.filter(x=>x===2).length;
+  const c3 = reopen.filter(x=>x>=3).length;
+  const reopenedCount = total - c0;
+  const reopenEntries = [
+    ["0 (no reabierto)", c0],
+    ["1 vez", c1],
+    ["2 veces", c2],
+    ["3+ veces", c3],
+  ];
+
+  // 8) Threads (total, avg, top10)
+  const threads = rows.map(r => Math.max(0, toNumber(cols.threads ? r[cols.threads] : 0, 0)));
+  const threadsTotal = threads.reduce((a,b)=>a+b,0);
+  const threadsAvg = threadsTotal / total;
+
+  const tids = rows.map(r => cleanText(cols.ticketId ? r[cols.ticketId] : "") || "Sin ID");
+  const byTicket = new Map();
+  for (let i=0;i<rows.length;i++){
+    const k = tids[i];
+    byTicket.set(k, (byTicket.get(k)||0) + threads[i]);
+  }
+  const topThreads = [...byTicket.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10);
+
+  setKpis(total, reopenedCount, threadsTotal, threadsAvg);
+
+  el("txtClass").textContent = bulletText(clsEntries, total);
+  el("txtStatus").textContent = bulletText(stEntries, total);
+  el("txtClients").textContent = bulletText(topClients, total) + ` (columna: ${clientCol || "N/A"})`;
+  el("txtSLA").textContent = bulletText(slaEntries, total);
+  el("txtCat").textContent = bulletText(catEntries, total);
+  el("txtEvt").textContent = bulletText(evtEntries, total);
+  el("txtReopen").textContent = `De ${total} tickets, ${reopenedCount} (${pct(reopenedCount,total).toFixed(1)}%) fueron reabiertos. Detalle: 1=${c1}, 2=${c2}, 3+ =${c3}.`;
+  el("txtThreads").textContent = `Total interacciones: ${Math.round(threadsTotal)} | Promedio: ${threadsAvg.toFixed(2)} | Top 10 por Ticket ID.`;
+
+  makeChart("class","chClass", clsEntries.map(x=>x[0]), clsEntries.map(x=>x[1]), false);
+  makeChart("status","chStatus", stEntries.map(x=>x[0]), stEntries.map(x=>x[1]), true);
+  makeChart("clients","chClients", topClients.map(x=>x[0]), topClients.map(x=>x[1]), true);
+  makeChart("sla","chSLA", slaEntries.map(x=>x[0]), slaEntries.map(x=>x[1]), false);
+  makeChart("cat","chCat", catEntries.map(x=>x[0]), catEntries.map(x=>x[1]), true);
+  makeChart("evt","chEvt", evtEntries.map(x=>x[0]), evtEntries.map(x=>x[1]), true);
+  makeChart("reopen","chReopen", reopenEntries.map(x=>x[0]), reopenEntries.map(x=>x[1]), false);
+  makeChart("threadsTop","chThreadsTop", topThreads.map(x=>x[0]), topThreads.map(x=>x[1]), true);
+
+  renderTable(headers, rows);
+}
+
+function applyFilterAndRender(){
+  const cols = detectColumns(RAW.headers);
+  const sel = el("ownerSelect").value;
+
+  if (sel === "__ALL__" || !cols.owner) FILTERED = RAW.data.slice();
+  else FILTERED = RAW.data.filter(r => cleanText(r[cols.owner]) === sel);
+
+  buildReport(FILTERED);
+  applySearch();
+}
+
+/* ================= Import ================= */
+async function loadCsvFile(file){
+  try{
+    clearErr();
+    setStatus("Leyendo CSV…");
+    LAST_FILE_NAME = file?.name || "CSV";
+
+    const text = await file.text();
+    const parsed = parseCsvSemicolon(text);
+
+    RAW = { headers: parsed.headers, data: parsed.data };
+    el("fileInfo").textContent = `${LAST_FILE_NAME} • ${RAW.data.length} filas`;
+    setStatus("Cargado ✅");
+
+    const cols = detectColumns(RAW.headers);
+    renderOwnerSelect(RAW.data, cols);
+    el("ownerSelect").value = "__ALL__";
+    applyFilterAndRender();
+
+  } catch (e){
+    showErr("Error al leer/parsear CSV: " + (e?.message || String(e)));
+    setStatus("Error");
+  }
+}
+
+/* ================= Export HTML/PDF ================= */
+function safeJsonStringify(obj){
+  // evita quebrar <script> si el JSON contiene accidentalmente </script
+  return JSON.stringify(obj).replace(/<\/script/gi, "<\\/script");
+}
+
+function buildPayloadForSelection(){
+  const cols = detectColumns(RAW.headers);
+  const sel = el("ownerSelect").value;
+
+  let rows = RAW.data.slice();
+  let titleSuffix = "General";
+
+  if (sel !== "__ALL__"){
+    if (!cols.owner) { alert("No pude detectar la columna Ticket Owner."); return null; }
+    rows = RAW.data.filter(r => cleanText(r[cols.owner]) === sel);
+    titleSuffix = sel;
+  }
+
+  return {
+    titleSuffix,
+    payload: {
+      headers: RAW.headers,
+      data: rows,
+      meta: {
+        generatedAt: new Date().toISOString(),
+        selection: sel,
+        sourceFile: LAST_FILE_NAME,
+        totalRows: rows.length
+      }
+    }
+  };
+}
+
+/* IMPORTANT: aquí usamos <\/script> para no romper el <script> actual */
 function exportHtmlForSelection(){
   if (!RAW.data.length){ alert("Primero importe un CSV."); return; }
-
   const built = buildPayloadForSelection();
   if (!built) return;
 
@@ -38,7 +633,6 @@ function exportHtmlForSelection(){
 
 function exportPdfForSelection(){
   if (!RAW.data.length){ alert("Primero importe un CSV."); return; }
-
   const built = buildPayloadForSelection();
   if (!built) return;
 
@@ -74,3 +668,42 @@ function exportPdfForSelection(){
   }
   setTimeout(()=>URL.revokeObjectURL(url), 10000);
 }
+
+/* ================= Wiring ================= */
+el("btnPickFile").addEventListener("click", () => el("fileInput").click());
+el("fileInput").addEventListener("change", (e)=>{
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  loadCsvFile(file);
+});
+el("ownerSelect").addEventListener("change", applyFilterAndRender);
+el("searchInput").addEventListener("input", applySearch);
+el("btnExportHtml").addEventListener("click", exportHtmlForSelection);
+el("btnExportPdf").addEventListener("click", exportPdfForSelection);
+
+/* Drag & Drop */
+const dz = el("dropZone");
+dz.addEventListener("dragover", (e)=>{ e.preventDefault(); dz.classList.add("bg-slate-800/50"); });
+dz.addEventListener("dragleave", ()=> dz.classList.remove("bg-slate-800/50"));
+dz.addEventListener("drop", (e)=>{
+  e.preventDefault();
+  dz.classList.remove("bg-slate-800/50");
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) loadCsvFile(file);
+});
+
+/* Auto-load embedded */
+(function(){
+  if (!window.__EMBEDDED_PAYLOAD__) return;
+  const p = window.__EMBEDDED_PAYLOAD__;
+  RAW = { headers: p.headers, data: p.data };
+  LAST_FILE_NAME = p.meta?.sourceFile || "CSV";
+  el("fileInfo").textContent = `${LAST_FILE_NAME} • ${(p.meta?.totalRows || RAW.data.length)} filas (embebido)`;
+  setStatus("Embebido ✅");
+  renderOwnerSelect(RAW.data, detectColumns(RAW.headers));
+  el("ownerSelect").value = "__ALL__";
+  applyFilterAndRender();
+})();
+</script>
+</body>
+</html>
