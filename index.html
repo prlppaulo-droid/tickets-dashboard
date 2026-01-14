@@ -8,10 +8,7 @@
   <!-- UI bonita (online) -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- CSV parser (online) -->
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-
-  <!-- Gráficos (online) -->
+  <!-- Charts (online) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
@@ -19,16 +16,14 @@
     .muted { color: rgba(255,255,255,.72); }
     canvas { max-height: 340px !important; }
 
-    /* Impressão para PDF */
     @media print {
-      header { display: none !important; }
-      #tableControls { display: none !important; }
+      header, #tableControls { display:none !important; }
       main { max-width: 100% !important; padding: 0 !important; }
       .card { break-inside: avoid; page-break-inside: avoid; }
       canvas { max-height: 260px !important; }
       body { background: white !important; color: #0f172a !important; }
       .muted { color: #334155 !important; }
-      .print-title { display: block !important; }
+      .print-title { display:block !important; }
     }
     .print-title { display:none; }
   </style>
@@ -40,14 +35,14 @@
       <div class="flex flex-wrap items-center gap-3 justify-between">
         <div>
           <h1 class="text-lg font-extrabold">Dashboard de Tickets</h1>
-          <p class="text-sm muted">Cargue un CSV, filtre por analista y exporte un HTML o PDF listo para enviar.</p>
+          <p class="text-sm muted">Cargue un CSV (delimitador “;”), reminder: todo se calcula sobre el total filtrado (General o Analista).</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-          <label class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 cursor-pointer">
-            <input id="fileInput" type="file" accept=".csv,text/csv" class="hidden" />
-            <span class="text-sm font-semibold">Importar CSV</span>
-          </label>
+          <input id="fileInput" type="file" accept=".csv,text/csv" class="hidden" />
+          <button id="btnPickFile" class="px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 text-sm font-semibold hover:bg-slate-800/60">
+            Importar CSV
+          </button>
 
           <select id="ownerSelect" class="px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 text-sm">
             <option value="__ALL__">General (Todos)</option>
@@ -63,16 +58,24 @@
         </div>
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center gap-2">
-        <span id="fileInfo" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">Sin archivo</span>
-        <span id="statusInfo" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">Listo</span>
-        <span id="errBanner" class="hidden text-xs px-3 py-1 rounded-full bg-red-500/15 border border-red-400/40 text-red-200"></span>
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+        <div id="dropZone" class="col-span-1 md:col-span-2 text-xs px-3 py-3 rounded-xl bg-slate-800/30 border border-dashed border-slate-600/50 muted">
+          Arrastre y suelte el CSV aquí (opcional). También puede usar “Importar CSV”.
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="fileInfo" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">Sin archivo</span>
+          <span id="statusInfo" class="text-xs px-3 py-1 rounded-full bg-slate-800/40 border border-slate-700/40 muted">Listo</span>
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <span id="errBanner" class="hidden text-xs px-3 py-2 rounded-xl bg-red-500/15 border border-red-400/40 text-red-200 block"></span>
       </div>
     </div>
   </header>
 
   <main class="max-w-6xl mx-auto px-4 py-6 space-y-4">
-    <!-- Título para impressão -->
     <section class="print-title">
       <h1 class="text-2xl font-black">Reporte de Tickets</h1>
       <p class="text-sm">Generado automáticamente</p>
@@ -173,8 +176,13 @@
   </main>
 
 <script>
-/* ================= Helpers ================= */
+/* ================= Utils ================= */
 const INVALID_TOKENS = new Set(["#REF!","#N/A","#VALUE!","#NAME?","#DIV/0!","#NULL!"]);
+const el = (id) => document.getElementById(id);
+
+function setStatus(msg){ el("statusInfo").textContent = msg; }
+function showErr(msg){ el("errBanner").classList.remove("hidden"); el("errBanner").textContent = msg; }
+function clearErr(){ el("errBanner").classList.add("hidden"); el("errBanner").textContent = ""; }
 
 function cleanText(v){
   if (v === null || v === undefined) return "";
@@ -207,6 +215,7 @@ function toNumber(v, fallback=0){
   const n = Number(s.replace(',','.'));
   return Number.isFinite(n) ? n : fallback;
 }
+function pct(v,total){ return total ? (v/total*100) : 0; }
 function countBy(arr){
   const m = new Map();
   for (const x of arr){
@@ -225,14 +234,67 @@ function topNPlusOthers(map, n){
   top.push(["Otros", rest]);
   return top;
 }
-function pct(v,total){ return total ? (v/total*100) : 0; }
+function bulletText(entries, total){
+  return entries.map(([k,v]) => `${k}: ${v} (${pct(v,total).toFixed(1)}%)`).join(" • ");
+}
 
-function setStatus(msg){ el("statusInfo").textContent = msg; }
-function showErr(msg){ el("errBanner").classList.remove("hidden"); el("errBanner").textContent = msg; }
-function clearErr(){ el("errBanner").classList.add("hidden"); el("errBanner").textContent = ""; }
-function el(id){ return document.getElementById(id); }
+/* ================= CSV parser (sin librerías) =================
+   - Delimitador ; (como tu CSV)
+   - Soporta comillas y ; dentro de comillas
+*/
+function parseCsvSemicolon(text){
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
 
-/* ================= Data + Columns ================= */
+  for (let i=0;i<text.length;i++){
+    const c = text[i];
+    const next = text[i+1];
+
+    if (c === '"'){
+      if (inQuotes && next === '"'){ field += '"'; i++; }
+      else inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (!inQuotes && c === ';'){
+      row.push(field);
+      field = "";
+      continue;
+    }
+
+    if (!inQuotes && (c === '\n' || c === '\r')){
+      if (c === '\r' && next === '\n') i++;
+      row.push(field);
+      field = "";
+      if (row.length > 1 || cleanText(row[0])) rows.push(row);
+      row = [];
+      continue;
+    }
+
+    field += c;
+  }
+
+  // last
+  row.push(field);
+  if (row.length > 1 || cleanText(row[0])) rows.push(row);
+
+  if (!rows.length) return { headers: [], data: [] };
+
+  const headers = rows[0].map(h => cleanText(h));
+  const data = rows.slice(1).map(r=>{
+    const obj = {};
+    for (let i=0;i<headers.length;i++){
+      obj[headers[i]] = cleanText(r[i] ?? "");
+    }
+    return obj;
+  });
+
+  return { headers, data };
+}
+
+/* ================= Data & Columns ================= */
 let RAW = { headers: [], data: [] };
 let FILTERED = [];
 let LAST_FILE_NAME = "CSV";
@@ -258,13 +320,20 @@ let charts = {};
 function destroyChart(key){
   if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 }
-
-function makeChart(key, canvasId, type, labels, data, isHorizontal=false){
+function makeChart(key, canvasId, labels, data, horizontal=false){
   destroyChart(key);
-  const ctx = document.getElementById(canvasId);
 
+  if (!window.Chart){
+    // Chart.js no cargó: no rompe el dashboard
+    const c = el(canvasId);
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0,0,c.width,c.height);
+    return;
+  }
+
+  const ctx = el(canvasId);
   charts[key] = new Chart(ctx, {
-    type,
+    type: "bar",
     data: {
       labels,
       datasets: [{
@@ -275,7 +344,7 @@ function makeChart(key, canvasId, type, labels, data, isHorizontal=false){
       }]
     },
     options: {
-      indexAxis: isHorizontal ? 'y' : 'x',
+      indexAxis: horizontal ? "y" : "x",
       responsive: true,
       plugins: {
         legend: { display: false },
@@ -297,7 +366,7 @@ function makeChart(key, canvasId, type, labels, data, isHorizontal=false){
   });
 }
 
-/* ================= Render ================= */
+/* ================= Rendering ================= */
 function renderOwnerSelect(rows, cols){
   const sel = el("ownerSelect");
   const current = sel.value;
@@ -306,7 +375,6 @@ function renderOwnerSelect(rows, cols){
 
   const owners = new Set();
   rows.forEach(r => { const o = cleanText(r[cols.owner]); if (o) owners.add(o); });
-
   [...owners].sort((a,b)=>a.localeCompare(b,'es')).forEach(o => {
     const opt = document.createElement("option");
     opt.value = o; opt.textContent = o;
@@ -321,10 +389,6 @@ function setKpis(total, reopenedCount, threadsTotal, threadsAvg){
   el("kpiReopened").textContent = `${reopenedCount.toLocaleString("es-ES")} (${pct(reopenedCount,total).toFixed(1)}%)`;
   el("kpiThreadsTotal").textContent = Math.round(threadsTotal).toLocaleString("es-ES");
   el("kpiThreadsAvg").textContent = threadsAvg.toFixed(2);
-}
-
-function bulletText(entries, total){
-  return entries.map(([k,v]) => `${k}: ${v} (${pct(v,total).toFixed(1)}%)`).join(" • ");
 }
 
 function renderTable(headers, rows){
@@ -342,7 +406,6 @@ function renderTable(headers, rows){
 
   const MAX = 2500;
   const show = rows.slice(0, MAX);
-
   show.forEach(r=>{
     const tr = document.createElement("tr");
     headers.forEach(h=>{
@@ -367,24 +430,12 @@ function applySearch(){
 function buildReport(rows){
   clearErr();
   if (!rows.length){
-    showErr("No hay filas para calcular (0).");
+    showErr("No hay filas para calcular (0). Importe un CSV.");
     return;
   }
 
   const headers = RAW.headers;
   const cols = detectColumns(headers);
-
-  const missing = [];
-  if (!cols.classifications) missing.push("Classifications");
-  if (!cols.status) missing.push("Status (Ticket)");
-  if (!cols.sla) missing.push("SLA Violation Type");
-  if (!cols.reopen) missing.push("Number of Reopen");
-  if (!cols.threads) missing.push("Number of Threads");
-  if (!cols.ticketId) missing.push("Ticket ID/ID");
-  if (missing.length){
-    showErr("Faltan columnas o no pude detectarlas: " + missing.join(", "));
-  }
-
   const total = rows.length;
 
   // 1) Classifications
@@ -436,7 +487,7 @@ function buildReport(rows){
     ["3+ veces", c3],
   ];
 
-  // 8) Threads
+  // 8) Threads (total, avg, top10)
   const threads = rows.map(r => Math.max(0, toNumber(r[cols.threads], 0)));
   const threadsTotal = threads.reduce((a,b)=>a+b,0);
   const threadsAvg = threadsTotal / total;
@@ -449,10 +500,8 @@ function buildReport(rows){
   }
   const topThreads = [...byTicket.entries()].sort((a,b)=>b[1]-a[1]).slice(0,10);
 
-  // KPIs
   setKpis(total, reopenedCount, threadsTotal, threadsAvg);
 
-  // Textos
   el("txtClass").textContent = bulletText(clsEntries, total);
   el("txtStatus").textContent = bulletText(stEntries, total);
   el("txtClients").textContent = bulletText(topClients, total) + ` (columna: ${clientCol || "N/A"})`;
@@ -462,15 +511,14 @@ function buildReport(rows){
   el("txtReopen").textContent = `De ${total} tickets, ${reopenedCount} (${pct(reopenedCount,total).toFixed(1)}%) fueron reabiertos. Detalle: 1=${c1}, 2=${c2}, 3+ =${c3}.`;
   el("txtThreads").textContent = `Total interacciones: ${Math.round(threadsTotal)} | Promedio: ${threadsAvg.toFixed(2)} | Top 10 por Ticket ID.`;
 
-  // Charts
-  makeChart("class","chClass","bar", clsEntries.map(x=>x[0]), clsEntries.map(x=>x[1]));
-  makeChart("status","chStatus","bar", stEntries.map(x=>x[0]), stEntries.map(x=>x[1]), true);
-  makeChart("clients","chClients","bar", topClients.map(x=>x[0]), topClients.map(x=>x[1]), true);
-  makeChart("sla","chSLA","bar", slaEntries.map(x=>x[0]), slaEntries.map(x=>x[1]));
-  makeChart("cat","chCat","bar", catEntries.map(x=>x[0]), catEntries.map(x=>x[1]), true);
-  makeChart("evt","chEvt","bar", evtEntries.map(x=>x[0]), evtEntries.map(x=>x[1]), true);
-  makeChart("reopen","chReopen","bar", reopenEntries.map(x=>x[0]), reopenEntries.map(x=>x[1]));
-  makeChart("threadsTop","chThreadsTop","bar", topThreads.map(x=>x[0]), topThreads.map(x=>x[1]), true);
+  makeChart("class","chClass", clsEntries.map(x=>x[0]), clsEntries.map(x=>x[1]), false);
+  makeChart("status","chStatus", stEntries.map(x=>x[0]), stEntries.map(x=>x[1]), true);
+  makeChart("clients","chClients", topClients.map(x=>x[0]), topClients.map(x=>x[1]), true);
+  makeChart("sla","chSLA", slaEntries.map(x=>x[0]), slaEntries.map(x=>x[1]), false);
+  makeChart("cat","chCat", catEntries.map(x=>x[0]), catEntries.map(x=>x[1]), true);
+  makeChart("evt","chEvt", evtEntries.map(x=>x[0]), evtEntries.map(x=>x[1]), true);
+  makeChart("reopen","chReopen", reopenEntries.map(x=>x[0]), reopenEntries.map(x=>x[1]), false);
+  makeChart("threadsTop","chThreadsTop", topThreads.map(x=>x[0]), topThreads.map(x=>x[1]), true);
 
   renderTable(headers, rows);
 }
@@ -486,7 +534,37 @@ function applyFilterAndRender(){
   applySearch();
 }
 
-/* ================= Export (HTML/PDF) ================= */
+/* ================= Import ================= */
+async function loadCsvFile(file){
+  try{
+    clearErr();
+    setStatus("Leyendo CSV…");
+    LAST_FILE_NAME = file?.name || "CSV";
+
+    const text = await file.text();
+    const parsed = parseCsvSemicolon(text);
+
+    RAW = { headers: parsed.headers, data: parsed.data };
+    el("fileInfo").textContent = `${LAST_FILE_NAME} • ${RAW.data.length} filas`;
+    setStatus("Cargado ✅");
+
+    const cols = detectColumns(RAW.headers);
+    renderOwnerSelect(RAW.data, cols);
+    el("ownerSelect").value = "__ALL__";
+    applyFilterAndRender();
+
+  } catch (e){
+    showErr("Error al leer/parsear CSV: " + (e?.message || String(e)));
+    setStatus("Error");
+  }
+}
+
+/* ================= Export HTML/PDF ================= */
+function safeJsonStringify(obj){
+  // evita quebrar <script> se aparecer accidentalmente
+  return JSON.stringify(obj).replace(/<\/script/gi, "<\\/script");
+}
+
 function buildPayloadForSelection(){
   const cols = detectColumns(RAW.headers);
   const sel = el("ownerSelect").value;
@@ -517,19 +595,18 @@ function buildPayloadForSelection(){
 
 function exportHtmlForSelection(){
   if (!RAW.data.length){ alert("Primero importe un CSV."); return; }
-
   const built = buildPayloadForSelection();
   if (!built) return;
-  const { titleSuffix, payload } = built;
 
+  const { titleSuffix, payload } = built;
   const base = document.documentElement.outerHTML;
+
   const injected = base.replace(
     "</body>",
-    `<script>window.__EMBEDDED_PAYLOAD__=${JSON.stringify(payload)};</script>
+    `<script>window.__EMBEDDED_PAYLOAD__=${safeJsonStringify(payload)};</script>
      <script>
        (function(){
          const p = window.__EMBEDDED_PAYLOAD__;
-         if(!p) return;
          RAW={headers:p.headers,data:p.data};
          LAST_FILE_NAME = p.meta.sourceFile || "CSV";
          document.getElementById("fileInfo").textContent =
@@ -550,25 +627,23 @@ function exportHtmlForSelection(){
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 1200);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
 }
 
 function exportPdfForSelection(){
   if (!RAW.data.length){ alert("Primero importe un CSV."); return; }
-
   const built = buildPayloadForSelection();
   if (!built) return;
-  const { payload } = built;
 
+  const { payload } = built;
   const base = document.documentElement.outerHTML;
+
   const injected = base.replace(
     "</body>",
-    `<script>window.__EMBEDDED_PAYLOAD__=${JSON.stringify(payload)};</script>
+    `<script>window.__EMBEDDED_PAYLOAD__=${safeJsonStringify(payload)};</script>
      <script>
        (function(){
          const p = window.__EMBEDDED_PAYLOAD__;
-         if(!p) return;
-
          RAW={headers:p.headers,data:p.data};
          LAST_FILE_NAME = p.meta.sourceFile || "CSV";
          document.getElementById("fileInfo").textContent =
@@ -578,62 +653,23 @@ function exportPdfForSelection(){
          applyFilterAndRender();
          document.title = "Reporte Tickets - " + (p.meta.selection==="__ALL__" ? "General" : p.meta.selection);
          setStatus("Embebido ✅");
-
-         // Espera um pouco para o Chart.js renderizar e chama print
-         setTimeout(()=>window.print(), 800);
+         setTimeout(()=>window.print(), 900);
        })();
      </script></body>`
   );
 
   const blob = new Blob([injected], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-
   const w = window.open(url, "_blank");
   if(!w){
     alert("Pop-up bloqueado. Permita pop-ups para exportar PDF.");
     return;
   }
-
-  setTimeout(()=>URL.revokeObjectURL(url), 8000);
+  setTimeout(()=>URL.revokeObjectURL(url), 10000);
 }
 
-/* ================= CSV Import ================= */
-function loadCsvFile(file){
-  clearErr();
-  setStatus("Leyendo CSV…");
-  LAST_FILE_NAME = file?.name || "CSV";
-
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    delimiter: ";",
-    dynamicTyping: false,
-    complete: (res) => {
-      const data = (res.data || []).map(row=>{
-        const o={};
-        Object.keys(row).forEach(k => o[cleanText(k)] = cleanText(row[k]));
-        return o;
-      });
-
-      const headers = Object.keys(data[0] || {});
-      RAW = { headers, data };
-
-      el("fileInfo").textContent = `${LAST_FILE_NAME} • ${data.length} filas`;
-      setStatus("Cargado ✅");
-
-      const cols = detectColumns(headers);
-      renderOwnerSelect(data, cols);
-      el("ownerSelect").value = "__ALL__";
-      applyFilterAndRender();
-    },
-    error: (err) => {
-      showErr("Error al leer CSV: " + (err?.message || String(err)));
-      setStatus("Error");
-    }
-  });
-}
-
-/* ================= Boot / Wiring ================= */
+/* ================= Wiring ================= */
+el("btnPickFile").addEventListener("click", () => el("fileInput").click());
 el("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files && e.target.files[0];
   if (!file) return;
@@ -644,8 +680,19 @@ el("searchInput").addEventListener("input", applySearch);
 el("btnExportHtml").addEventListener("click", exportHtmlForSelection);
 el("btnExportPdf").addEventListener("click", exportPdfForSelection);
 
+/* Drag & Drop */
+const dz = el("dropZone");
+dz.addEventListener("dragover", (e)=>{ e.preventDefault(); dz.classList.add("bg-slate-800/50"); });
+dz.addEventListener("dragleave", ()=> dz.classList.remove("bg-slate-800/50"));
+dz.addEventListener("drop", (e)=>{
+  e.preventDefault();
+  dz.classList.remove("bg-slate-800/50");
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) loadCsvFile(file);
+});
+
 /* Auto-load embedded */
-(function autoLoadEmbedded(){
+(function(){
   if (!window.__EMBEDDED_PAYLOAD__) return;
   const p = window.__EMBEDDED_PAYLOAD__;
   RAW = { headers: p.headers, data: p.data };
