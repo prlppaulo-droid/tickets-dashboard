@@ -240,10 +240,7 @@ function bulletText(entries, total){
   return entries.map(([k,v]) => `${k}: ${v} (${pct(v,total).toFixed(1)}%)`).join(" • ");
 }
 
-/* ================= CSV parser (sin librerías) =================
-   - Delimitador ; (como tu CSV)
-   - Soporta comillas y ; dentro de comillas
-*/
+/* ================= CSV parser (sin librerías) ================= */
 function parseCsvSemicolon(text){
   const rows = [];
   let row = [];
@@ -259,22 +256,16 @@ function parseCsvSemicolon(text){
       else inQuotes = !inQuotes;
       continue;
     }
-
     if (!inQuotes && c === ';'){
-      row.push(field);
-      field = "";
-      continue;
+      row.push(field); field = ""; continue;
     }
-
     if (!inQuotes && (c === '\n' || c === '\r')){
       if (c === '\r' && next === '\n') i++;
-      row.push(field);
-      field = "";
+      row.push(field); field = "";
       if (row.length > 1 || cleanText(row[0])) rows.push(row);
       row = [];
       continue;
     }
-
     field += c;
   }
 
@@ -487,7 +478,7 @@ function buildReport(rows){
     ["3+ veces", c3],
   ];
 
-  // 8) Threads (total, avg, top10)
+  // 8) Threads
   const threads = rows.map(r => Math.max(0, toNumber(cols.threads ? r[cols.threads] : 0, 0)));
   const threadsTotal = threads.reduce((a,b)=>a+b,0);
   const threadsAvg = threadsTotal / total;
@@ -559,10 +550,10 @@ async function loadCsvFile(file){
   }
 }
 
-/* ================= Export HTML/PDF ================= */
-function safeJsonStringify(obj){
-  // evita quebrar <script> si el JSON contiene accidentalmente </script
-  return JSON.stringify(obj).replace(/<\/script/gi, "<\\/script");
+/* ================= Export (SIN poner </script> literal) ================= */
+function safeJson(obj){
+  // evita que un payload con "< /script" rompa un HTML exportado
+  return JSON.stringify(obj).replace(/<\\\/script/gi, "<\\\\/script");
 }
 
 function buildPayloadForSelection(){
@@ -593,33 +584,35 @@ function buildPayloadForSelection(){
   };
 }
 
-/* IMPORTANT: aquí usamos <\/script> para no romper el <script> actual */
 function exportHtmlForSelection(){
   if (!RAW.data.length){ alert("Primero importe un CSV."); return; }
   const built = buildPayloadForSelection();
   if (!built) return;
 
   const { titleSuffix, payload } = built;
-  const base = document.documentElement.outerHTML;
 
-  const injected = base.replace(
-    "</body>",
-    `<script>window.__EMBEDDED_PAYLOAD__=${safeJsonStringify(payload)};<\\/script>
-     <script>
-       (function(){
-         const p = window.__EMBEDDED_PAYLOAD__;
-         RAW={headers:p.headers,data:p.data};
-         LAST_FILE_NAME = p.meta.sourceFile || "CSV";
-         document.getElementById("fileInfo").textContent =
-           (p.meta.sourceFile||"CSV")+" • "+p.meta.totalRows+" filas (embebido)";
-         document.getElementById("ownerSelect").value="__ALL__";
-         renderOwnerSelect(RAW.data, detectColumns(RAW.headers));
-         applyFilterAndRender();
-         document.title = "Reporte Tickets - " + (p.meta.selection==="__ALL__" ? "General" : p.meta.selection);
-         setStatus("Embebido ✅");
-       })();
-     <\\/script><\\/body>`
-  );
+  const openScript = "<scr" + "ipt>";
+  const closeScript = "</scr" + "ipt>";
+
+  const payloadScript = openScript + "window.__EMBEDDED_PAYLOAD__=" + safeJson(payload) + ";" + closeScript;
+
+  const bootstrapScript =
+    openScript +
+    "(function(){try{" +
+      "const p=window.__EMBEDDED_PAYLOAD__;" +
+      "RAW={headers:p.headers,data:p.data};" +
+      "LAST_FILE_NAME=p.meta.sourceFile||'CSV';" +
+      "document.getElementById('fileInfo').textContent=(p.meta.sourceFile||'CSV')+' • '+p.meta.totalRows+' filas (embebido)';" +
+      "document.getElementById('ownerSelect').value='__ALL__';" +
+      "renderOwnerSelect(RAW.data, detectColumns(RAW.headers));" +
+      "applyFilterAndRender();" +
+      "document.title='Reporte Tickets - '+(p.meta.selection==='__ALL__'?'General':p.meta.selection);" +
+      "setStatus('Embebido ✅');" +
+    "}catch(e){console.error(e);}})();" +
+    closeScript;
+
+  const base = document.documentElement.outerHTML;
+  const injected = base.replace("</body>", payloadScript + bootstrapScript + "</body>");
 
   const blob = new Blob([injected], { type: "text/html;charset=utf-8" });
   const a = document.createElement("a");
@@ -637,27 +630,30 @@ function exportPdfForSelection(){
   if (!built) return;
 
   const { payload } = built;
-  const base = document.documentElement.outerHTML;
 
-  const injected = base.replace(
-    "</body>",
-    `<script>window.__EMBEDDED_PAYLOAD__=${safeJsonStringify(payload)};<\\/script>
-     <script>
-       (function(){
-         const p = window.__EMBEDDED_PAYLOAD__;
-         RAW={headers:p.headers,data:p.data};
-         LAST_FILE_NAME = p.meta.sourceFile || "CSV";
-         document.getElementById("fileInfo").textContent =
-           (p.meta.sourceFile||"CSV")+" • "+p.meta.totalRows+" filas (embebido)";
-         document.getElementById("ownerSelect").value="__ALL__";
-         renderOwnerSelect(RAW.data, detectColumns(RAW.headers));
-         applyFilterAndRender();
-         document.title = "Reporte Tickets - " + (p.meta.selection==="__ALL__" ? "General" : p.meta.selection);
-         setStatus("Embebido ✅");
-         setTimeout(()=>window.print(), 900);
-       })();
-     <\\/script><\\/body>`
-  );
+  const openScript = "<scr" + "ipt>";
+  const closeScript = "</scr" + "ipt>";
+
+  const payloadScript = openScript + "window.__EMBEDDED_PAYLOAD__=" + safeJson(payload) + ";" + closeScript;
+
+  const bootstrapScript =
+    openScript +
+    "(function(){try{" +
+      "const p=window.__EMBEDDED_PAYLOAD__;" +
+      "RAW={headers:p.headers,data:p.data};" +
+      "LAST_FILE_NAME=p.meta.sourceFile||'CSV';" +
+      "document.getElementById('fileInfo').textContent=(p.meta.sourceFile||'CSV')+' • '+p.meta.totalRows+' filas (embebido)';" +
+      "document.getElementById('ownerSelect').value='__ALL__';" +
+      "renderOwnerSelect(RAW.data, detectColumns(RAW.headers));" +
+      "applyFilterAndRender();" +
+      "document.title='Reporte Tickets - '+(p.meta.selection==='__ALL__'?'General':p.meta.selection);" +
+      "setStatus('Embebido ✅');" +
+      "setTimeout(()=>window.print(), 900);" +
+    "}catch(e){console.error(e);}})();" +
+    closeScript;
+
+  const base = document.documentElement.outerHTML;
+  const injected = base.replace("</body>", payloadScript + bootstrapScript + "</body>");
 
   const blob = new Blob([injected], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -692,7 +688,7 @@ dz.addEventListener("drop", (e)=>{
   if (file) loadCsvFile(file);
 });
 
-/* Auto-load embedded */
+/* Auto-load embedded (si existe) */
 (function(){
   if (!window.__EMBEDDED_PAYLOAD__) return;
   const p = window.__EMBEDDED_PAYLOAD__;
