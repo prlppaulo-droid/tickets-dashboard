@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Reporte de Tickets - Dashboard</title>
 
-  <!-- UI bonita (online) -->
+  <!-- UI (online) -->
   <script src="https://cdn.tailwindcss.com"></script>
 
   <!-- Charts (online) -->
@@ -15,7 +15,6 @@
     .card { border: 1px solid rgba(148,163,184,.35); }
     .muted { color: rgba(255,255,255,.72); }
     canvas { max-height: 340px !important; }
-
     @media print {
       header, #tableControls { display:none !important; }
       main { max-width: 100% !important; padding: 0 !important; }
@@ -82,7 +81,6 @@
       <hr class="my-3" />
     </section>
 
-    <!-- KPIs -->
     <section class="grid grid-cols-1 md:grid-cols-4 gap-3">
       <div class="card rounded-2xl bg-slate-900/40 p-4">
         <div class="text-xs muted">Tickets (total)</div>
@@ -102,7 +100,6 @@
       </div>
     </section>
 
-    <!-- Charts -->
     <section class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div class="card rounded-2xl bg-slate-900/40 p-4">
         <h2 class="font-bold">1) Total por clasificación</h2>
@@ -153,7 +150,6 @@
       </div>
     </section>
 
-    <!-- Table -->
     <section class="card rounded-2xl bg-slate-900/40 p-4">
       <div id="tableControls" class="flex flex-wrap items-center gap-2 justify-between">
         <h2 class="font-bold">Tabla (filtrada)</h2>
@@ -176,7 +172,7 @@
   </main>
 
 <script>
-/* ================= Utils ================= */
+/* ===== Helpers base ===== */
 const INVALID_TOKENS = new Set(["#REF!","#N/A","#VALUE!","#NAME?","#DIV/0!","#NULL!"]);
 const el = (id) => document.getElementById(id);
 
@@ -240,7 +236,7 @@ function bulletText(entries, total){
   return entries.map(([k,v]) => `${k}: ${v} (${pct(v,total).toFixed(1)}%)`).join(" • ");
 }
 
-/* ================= CSV parser (sin librerías) ================= */
+/* ===== CSV parser (;) ===== */
 function parseCsvSemicolon(text){
   const rows = [];
   let row = [];
@@ -286,7 +282,7 @@ function parseCsvSemicolon(text){
   return { headers, data };
 }
 
-/* ================= Data & Columns ================= */
+/* ===== Data ===== */
 let RAW = { headers: [], data: [] };
 let FILTERED = [];
 let LAST_FILE_NAME = "CSV";
@@ -307,11 +303,10 @@ function detectColumns(headers){
   };
 }
 
-/* ================= Charts ================= */
+/* ===== Charts ===== */
 let charts = {};
-function destroyChart(key){
-  if (charts[key]) { charts[key].destroy(); delete charts[key]; }
-}
+function destroyChart(key){ if (charts[key]) { charts[key].destroy(); delete charts[key]; } }
+
 function makeChart(key, canvasId, labels, data, horizontal=false){
   destroyChart(key);
 
@@ -357,7 +352,7 @@ function makeChart(key, canvasId, labels, data, horizontal=false){
   });
 }
 
-/* ================= Rendering ================= */
+/* ===== Render ===== */
 function renderOwnerSelect(rows, cols){
   const sel = el("ownerSelect");
   const current = sel.value;
@@ -429,7 +424,6 @@ function buildReport(rows){
   const cols = detectColumns(headers);
   const total = rows.length;
 
-  // 1) Classifications
   const cls = rows.map(r=>{
     const v = cleanText(cols.classifications ? r[cols.classifications] : "");
     const low = v.toLowerCase();
@@ -439,11 +433,9 @@ function buildReport(rows){
   });
   const clsEntries = sortDescEntries(countBy(cls));
 
-  // 2) Status
   const st = rows.map(r => cleanText(cols.status ? r[cols.status] : "") || "Sin estado");
   const stEntries = topNPlusOthers(countBy(st), 12);
 
-  // 3) Clients
   let clientCol = cols.customer || cols.account;
   let clients = rows.map(r => cleanText(clientCol ? r[clientCol] : "") || "Sin cliente");
   if (new Set(clients).size <= 1 && cols.account && clientCol !== cols.account){
@@ -452,19 +444,15 @@ function buildReport(rows){
   }
   const topClients = topNFromMap(countBy(clients), 5);
 
-  // 4) SLA
   const sla = rows.map(r => cleanText(cols.sla ? r[cols.sla] : "") || "Sin información");
   const slaEntries = topNPlusOthers(countBy(sla), 12);
 
-  // 5) Categories
   const cat = rows.map(r => cleanText(cols.cat ? r[cols.cat] : "") || "Sin categoría");
   const catEntries = topNFromMap(countBy(cat), 10);
 
-  // 6) Events
   const evt = rows.map(r => cleanText(cols.evt ? r[cols.evt] : "") || "Sin evento");
   const evtEntries = topNFromMap(countBy(evt), 10);
 
-  // 7) Reopen (0,1,2,3+)
   const reopen = rows.map(r => Math.max(0, Math.floor(toNumber(cols.reopen ? r[cols.reopen] : 0, 0))));
   const c0 = reopen.filter(x=>x===0).length;
   const c1 = reopen.filter(x=>x===1).length;
@@ -478,7 +466,6 @@ function buildReport(rows){
     ["3+ veces", c3],
   ];
 
-  // 8) Threads
   const threads = rows.map(r => Math.max(0, toNumber(cols.threads ? r[cols.threads] : 0, 0)));
   const threadsTotal = threads.reduce((a,b)=>a+b,0);
   const threadsAvg = threadsTotal / total;
@@ -525,7 +512,7 @@ function applyFilterAndRender(){
   applySearch();
 }
 
-/* ================= Import ================= */
+/* ===== Import CSV ===== */
 async function loadCsvFile(file){
   try{
     clearErr();
@@ -550,10 +537,11 @@ async function loadCsvFile(file){
   }
 }
 
-/* ================= Export (SIN poner </script> literal) ================= */
+/* ===== Export HTML/PDF ===== */
 function safeJson(obj){
-  // evita que un payload con "< /script" rompa un HTML exportado
-  return JSON.stringify(obj).replace(/<\\\/script/gi, "<\\\\/script");
+  const endTag = "</scr" + "ipt";
+  const rx = new RegExp(endTag, "gi");
+  return JSON.stringify(obj).replace(rx, "<\\\\/scr" + "ipt");
 }
 
 function buildPayloadForSelection(){
@@ -665,7 +653,7 @@ function exportPdfForSelection(){
   setTimeout(()=>URL.revokeObjectURL(url), 10000);
 }
 
-/* ================= Wiring ================= */
+/* ===== Wiring ===== */
 el("btnPickFile").addEventListener("click", () => el("fileInput").click());
 el("fileInput").addEventListener("change", (e)=>{
   const file = e.target.files && e.target.files[0];
@@ -677,7 +665,6 @@ el("searchInput").addEventListener("input", applySearch);
 el("btnExportHtml").addEventListener("click", exportHtmlForSelection);
 el("btnExportPdf").addEventListener("click", exportPdfForSelection);
 
-/* Drag & Drop */
 const dz = el("dropZone");
 dz.addEventListener("dragover", (e)=>{ e.preventDefault(); dz.classList.add("bg-slate-800/50"); });
 dz.addEventListener("dragleave", ()=> dz.classList.remove("bg-slate-800/50"));
@@ -688,7 +675,7 @@ dz.addEventListener("drop", (e)=>{
   if (file) loadCsvFile(file);
 });
 
-/* Auto-load embedded (si existe) */
+/* ===== Auto-load embedded ===== */
 (function(){
   if (!window.__EMBEDDED_PAYLOAD__) return;
   const p = window.__EMBEDDED_PAYLOAD__;
